@@ -1,0 +1,486 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum ThemePreference {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+enum WorkspaceType {
+  PERSONAL
+  FAMILY
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+  EXPIRED
+}
+
+enum WalletType {
+  CASH
+  BANK
+  E_WALLET
+  FAMILY_WALLET
+  OTHER
+}
+
+enum CategoryType {
+  INCOME
+  EXPENSE
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+enum BudgetPeriodType {
+  MONTHLY
+  CUSTOM
+}
+
+enum SavingsGoalStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum DebtType {
+  DEBT
+  RECEIVABLE
+}
+
+enum DebtStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+}
+
+enum RecurringFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum NotificationType {
+  BUDGET_WARNING
+  BUDGET_EXCEEDED
+  GOAL_ACHIEVED
+  DEBT_DUE_SOON
+  DEBT_OVERDUE
+  FAMILY_INVITATION
+  FAMILY_ACTIVITY
+  RECURRING_EXECUTED
+}
+
+model User {
+  id                      String          @id @default(uuid())
+  name                    String          @db.VarChar(120)
+  email                   String          @unique @db.VarChar(255)
+  passwordHash            String?         @map("password_hash") @db.VarChar(255)
+  googleId                String?         @unique @map("google_id") @db.VarChar(255)
+  avatarUrl               String?         @map("avatar_url") @db.Text
+  preferredCurrency       String          @default("IDR") @map("preferred_currency") @db.VarChar(10)
+  dateFormat              String          @default("DD/MM/YYYY") @map("date_format") @db.VarChar(20)
+  theme                   ThemePreference @default(LIGHT)
+  notificationPreferences Json?           @map("notification_preferences")
+  createdAt               DateTime        @default(now()) @map("created_at")
+  updatedAt               DateTime        @updatedAt @map("updated_at")
+
+  refreshTokens         RefreshToken[]
+  ownedWorkspace        Workspace[]           @relation("WorkspaceOwner")
+  memberships           WorkspaceMember[]
+  sentInvitations       FamilyInvitation[]    @relation("InvitationSender")
+  transactions          Transaction[]         @relation("TransactionCreator")
+  budgets               Budget[]              @relation("BudgetCreator")
+  savingsGoals          SavingsGoal[]         @relation("SavingsGoalCreator")
+  savingsContributions  SavingsContribution[] @relation("SavingsContributor")
+  debts                 Debt[]                @relation("DebtCreator")
+  debtPayments          DebtPayment[]         @relation("DebtPaymentRecorder")
+  recurringTransactions RecurringTransaction[] @relation("RecurringCreator")
+  notifications         Notification[]
+  auditLogs             AuditLog[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id                String    @id @default(uuid())
+  userId            String    @map("user_id")
+  tokenHash         String    @unique @map("token_hash") @db.VarChar(255)
+  familyId          String    @map("family_id") @db.VarChar(64)
+  expiresAt         DateTime  @map("expires_at")
+  revokedAt         DateTime? @map("revoked_at")
+  replacedByTokenId String?   @map("replaced_by_token_id") @db.VarChar(64)
+  userAgent         String?   @map("user_agent") @db.VarChar(255)
+  ipAddress         String?   @map("ip_address") @db.VarChar(64)
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+model Workspace {
+  id        String        @id @default(uuid())
+  name      String        @db.VarChar(120)
+  type      WorkspaceType @default(PERSONAL)
+  currency  String        @default("IDR") @db.VarChar(10)
+  ownerId   String        @map("owner_id")
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  owner                User                  @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members              WorkspaceMember[]
+  invitations          FamilyInvitation[]
+  wallets              Wallet[]
+  categories           Category[]
+  transactions         Transaction[]
+  budgets               Budget[]
+  savingsGoals          SavingsGoal[]
+  savingsContributions  SavingsContribution[]
+  debts                 Debt[]
+  debtPayments          DebtPayment[]
+  recurringTransactions RecurringTransaction[]
+  notifications         Notification[]
+  auditLogs             AuditLog[]
+
+  @@index([ownerId])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String        @id @default(uuid())
+  workspaceId String        @map("workspace_id")
+  userId      String        @map("user_id")
+  role        WorkspaceRole @default(MEMBER)
+  permissions Json
+  joinedAt    DateTime      @default(now()) @map("joined_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+model FamilyInvitation {
+  id              String           @id @default(uuid())
+  workspaceId     String           @map("workspace_id")
+  invitedEmail    String           @map("invited_email") @db.VarChar(255)
+  invitedByUserId String           @map("invited_by_user_id")
+  role            WorkspaceRole    @default(MEMBER)
+  permissions     Json
+  status          InvitationStatus @default(PENDING)
+  expiresAt       DateTime         @map("expires_at")
+  respondedAt     DateTime?        @map("responded_at")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation("InvitationSender", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@index([invitedEmail, status])
+  @@map("family_invitations")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  workspaceId String?  @map("workspace_id")
+  userId      String?  @map("user_id")
+  action      String   @db.VarChar(100)
+  entityType  String   @map("entity_type") @db.VarChar(80)
+  entityId    String?  @map("entity_id") @db.VarChar(80)
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  user      User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
+
+model Wallet {
+  id             String     @id @default(uuid())
+  workspaceId    String     @map("workspace_id")
+  name           String     @db.VarChar(100)
+  type           WalletType @default(CASH)
+  balance        Decimal    @default(0) @db.Decimal(19, 4)
+  initialBalance Decimal    @default(0) @map("initial_balance") @db.Decimal(19, 4)
+  currency       String     @default("IDR") @db.VarChar(10)
+  color          String     @default("#059669") @db.VarChar(20)
+  icon           String     @default("wallet") @db.VarChar(50)
+  isArchived     Boolean    @default(false) @map("is_archived")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  workspace            Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  outgoingTransactions  Transaction[]          @relation("SourceWallet")
+  incomingTransactions  Transaction[]          @relation("DestinationWallet")
+  savingsContributions  SavingsContribution[]
+  debtPayments          DebtPayment[]
+  recurringTransactions RecurringTransaction[]
+
+  @@index([workspaceId, isArchived])
+  @@map("wallets")
+}
+
+model Category {
+  id         String       @id @default(uuid())
+  workspaceId String      @map("workspace_id")
+  name       String       @db.VarChar(100)
+  type       CategoryType
+  icon       String       @default("tag") @db.VarChar(50)
+  color      String       @default("#059669") @db.VarChar(20)
+  isDefault  Boolean      @default(false) @map("is_default")
+  isArchived Boolean      @default(false) @map("is_archived")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  transactions          Transaction[]
+  budgets               Budget[]
+  recurringTransactions RecurringTransaction[]
+
+  @@unique([workspaceId, name, type])
+  @@index([workspaceId, type, isArchived])
+  @@map("categories")
+}
+
+model Transaction {
+  id                  String          @id @default(uuid())
+  workspaceId         String          @map("workspace_id")
+  walletId            String          @map("wallet_id")
+  destinationWalletId String?         @map("destination_wallet_id")
+  categoryId          String?         @map("category_id")
+  createdByUserId     String          @map("created_by_user_id")
+  type                TransactionType
+  amount              Decimal         @db.Decimal(19, 4)
+  transactionDate     DateTime        @map("transaction_date")
+  description         String          @db.VarChar(255)
+  note                String?         @db.Text
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  wallet            Wallet    @relation("SourceWallet", fields: [walletId], references: [id], onDelete: Restrict)
+  destinationWallet Wallet?   @relation("DestinationWallet", fields: [destinationWalletId], references: [id], onDelete: Restrict)
+  category          Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  createdBy         User      @relation("TransactionCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  debtPayment       DebtPayment?
+  recurringLog      RecurringExecutionLog?
+
+  @@index([workspaceId, transactionDate])
+  @@index([workspaceId, type, transactionDate])
+  @@index([workspaceId, walletId])
+  @@index([workspaceId, categoryId])
+  @@map("transactions")
+}
+
+model Budget {
+  id                      String           @id @default(uuid())
+  workspaceId             String           @map("workspace_id")
+  categoryId              String           @map("category_id")
+  createdByUserId         String           @map("created_by_user_id")
+  name                    String?          @db.VarChar(120)
+  periodType              BudgetPeriodType @default(MONTHLY) @map("period_type")
+  startDate               DateTime         @map("start_date")
+  endDate                 DateTime         @map("end_date")
+  amountLimit             Decimal          @map("amount_limit") @db.Decimal(19, 4)
+  warningThresholdPercent Int              @default(80) @map("warning_threshold_percent")
+  createdAt               DateTime         @default(now()) @map("created_at")
+  updatedAt               DateTime         @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category  Category  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  createdBy User      @relation("BudgetCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, startDate, endDate])
+  @@index([workspaceId, categoryId])
+  @@map("budgets")
+}
+
+model SavingsGoal {
+  id              String            @id @default(uuid())
+  workspaceId     String            @map("workspace_id")
+  createdByUserId String            @map("created_by_user_id")
+  name            String            @db.VarChar(120)
+  description     String?           @db.Text
+  targetAmount    Decimal           @map("target_amount") @db.Decimal(19, 4)
+  currentAmount   Decimal           @default(0) @map("current_amount") @db.Decimal(19, 4)
+  deadline        DateTime?
+  status          SavingsGoalStatus @default(ACTIVE)
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  workspace     Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy     User                  @relation("SavingsGoalCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  contributions SavingsContribution[]
+
+  @@index([workspaceId, status])
+  @@map("savings_goals")
+}
+
+model SavingsContribution {
+  id                  String   @id @default(uuid())
+  workspaceId         String   @map("workspace_id")
+  savingsGoalId       String   @map("savings_goal_id")
+  walletId            String   @map("wallet_id")
+  contributedByUserId String   @map("contributed_by_user_id")
+  amount              Decimal  @db.Decimal(19, 4)
+  contributionDate    DateTime @map("contribution_date")
+  note                String?  @db.Text
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  workspace     Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  savingsGoal   SavingsGoal @relation(fields: [savingsGoalId], references: [id], onDelete: Cascade)
+  wallet        Wallet      @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  contributedBy User        @relation("SavingsContributor", fields: [contributedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, savingsGoalId])
+  @@index([workspaceId, walletId])
+  @@map("savings_contributions")
+}
+
+model Debt {
+  id               String     @id @default(uuid())
+  workspaceId      String     @map("workspace_id")
+  createdByUserId  String     @map("created_by_user_id")
+  type             DebtType
+  counterpartyName String     @map("counterparty_name") @db.VarChar(150)
+  totalAmount      Decimal    @map("total_amount") @db.Decimal(19, 4)
+  paidAmount       Decimal    @default(0) @map("paid_amount") @db.Decimal(19, 4)
+  debtDate         DateTime   @map("debt_date")
+  dueDate          DateTime?  @map("due_date")
+  status           DebtStatus @default(UNPAID)
+  description      String?    @db.VarChar(255)
+  note             String?    @db.Text
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User          @relation("DebtCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  payments  DebtPayment[]
+
+  @@index([workspaceId, type, status])
+  @@index([workspaceId, dueDate])
+  @@map("debts")
+}
+
+model DebtPayment {
+  id               String   @id @default(uuid())
+  workspaceId      String   @map("workspace_id")
+  debtId           String   @map("debt_id")
+  walletId         String   @map("wallet_id")
+  transactionId    String?  @unique @map("transaction_id")
+  recordedByUserId String   @map("recorded_by_user_id")
+  amount           Decimal  @db.Decimal(19, 4)
+  paymentDate      DateTime @map("payment_date")
+  note             String?  @db.Text
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  debt        Debt         @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  wallet      Wallet       @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  recordedBy  User         @relation("DebtPaymentRecorder", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, debtId])
+  @@map("debt_payments")
+}
+
+model RecurringTransaction {
+  id              String             @id @default(uuid())
+  workspaceId     String             @map("workspace_id")
+  walletId        String             @map("wallet_id")
+  categoryId      String             @map("category_id")
+  createdByUserId String             @map("created_by_user_id")
+  type            TransactionType
+  amount          Decimal            @db.Decimal(19, 4)
+  description     String             @db.VarChar(255)
+  note            String?            @db.Text
+  frequency       RecurringFrequency
+  startDate       DateTime           @map("start_date")
+  endDate         DateTime?          @map("end_date")
+  nextRunDate     DateTime           @map("next_run_date")
+  lastRunDate     DateTime?          @map("last_run_date")
+  isActive        Boolean            @default(true) @map("is_active")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  workspace     Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  wallet        Wallet                  @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  category      Category                @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  createdBy     User                    @relation("RecurringCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  executionLogs RecurringExecutionLog[]
+
+  @@index([workspaceId, isActive, nextRunDate])
+  @@index([isActive, nextRunDate])
+  @@map("recurring_transactions")
+}
+
+model RecurringExecutionLog {
+  id                     String   @id @default(uuid())
+  recurringTransactionId String   @map("recurring_transaction_id")
+  workspaceId            String   @map("workspace_id")
+  scheduledForDate       DateTime @map("scheduled_for_date")
+  transactionId          String   @unique @map("transaction_id")
+  executedAt             DateTime @default(now()) @map("executed_at")
+
+  recurringTransaction RecurringTransaction @relation(fields: [recurringTransactionId], references: [id], onDelete: Cascade)
+  transaction          Transaction          @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@unique([recurringTransactionId, scheduledForDate])
+  @@index([workspaceId, executedAt])
+  @@map("recurring_execution_logs")
+}
+
+model Notification {
+  id            String           @id @default(uuid())
+  userId        String           @map("user_id")
+  workspaceId   String?          @map("workspace_id")
+  type          NotificationType
+  title         String           @db.VarChar(160)
+  message       String           @db.Text
+  isRead        Boolean          @default(false) @map("is_read")
+  readAt        DateTime?        @map("read_at")
+  referenceType String?          @map("reference_type") @db.VarChar(60)
+  referenceId   String?          @map("reference_id") @db.VarChar(80)
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@index([workspaceId, createdAt])
+  @@map("notifications")
+}
+
